@@ -222,7 +222,8 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:12px}
     </section>
 
     <section class="card">
-      <div class="notice"><b>Catatan:</b> Setelah menekan Submit, hasil disimpan di browser perangkat ini. Guru dapat mengekspor seluruh rekap menjadi CSV atau JSON.</div>
+      <div class="notice"><b>Catatan:</b> Setelah menekan Submit, hasil disimpan di browser perangkat ini sekaligus dikirim ke cloud (JSONBin) dan Google Sheets. Guru dapat mengekspor seluruh rekap menjadi CSV atau JSON.</div>
+      <p class="small" id="syncMsg"></p>
       <div class="actions">
         <button type="submit" class="primary">✓ Submit Asesmen</button>
         <button type="button" class="secondary" id="resetBtn">Reset Form</button>
@@ -249,7 +250,7 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:12px}
 
   <section class="card hidden" id="teacherPanel">
     <h2 class="section-title"><span class="num">G</span> Rekap Guru</h2>
-    <p class="small">Data tersimpan secara lokal pada browser. Untuk rekap kelas, gunakan perangkat/browser yang sama atau kumpulkan file JSON/CSV dari siswa.</p>
+    <p class="small">Data otomatis terkirim ke cloud JSONBin. Gunakan tombol "Muat dari JSONBin" untuk menarik rekap siswa yang mengerjakan dari perangkat lain ke browser ini.</p>
     <div class="stats">
       <div class="stat"><b id="studentCount">0</b><span>Total respons</span></div>
       <div class="stat"><b id="avgScore">0%</b><span>Rata-rata nilai</span></div>
@@ -258,7 +259,20 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:12px}
     <div class="actions">
       <button class="blue" id="downloadCSV">⬇ Download Rekap CSV</button>
       <button class="secondary" id="downloadJSON">⬇ Download Rekap JSON</button>
+      <button class="secondary" id="syncFromJB">⬆ Muat dari JSONBin</button>
+      <button class="secondary" id="configJB">⚙ Konfigurasi JSONBin</button>
       <button class="danger" id="clearData">Hapus Semua Data Lokal</button>
+    </div>
+    <div class="hidden" id="jbCfgBox" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+      <div class="grid">
+        <div><label>Bin ID JSONBin</label><input id="cfgBinId" placeholder="contoh: 6a9c56afda38895dfe3d4fa0"></div>
+        <div><label>Kunci API (X-Access-Key)</label><input id="cfgKey" type="password" placeholder="bcrypt hash seperti $2a$10$..."></div>
+      </div>
+      <p class="small">Bin berisi rekap siswa (private). Gunakan X-Access-Key yang dibuat di halaman API Keys (izin Bins Read + Update). Ubah lalu simpan, gunakan "Tes Koneksi" untuk memastikan berhasil.</p>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="primary" id="saveCfgBtn">Simpan Konfigurasi</button>
+        <button type="button" class="secondary" id="testJB">Tes Koneksi</button>
+      </div>
     </div>
     <div style="overflow:auto;margin-top:18px">
       <table class="admin-table">
@@ -281,6 +295,42 @@ document.getElementById("tanggal").value = new Date().toISOString().slice(0,10);
 
 function getData(){ return JSON.parse(localStorage.getItem(KEY) || "[]"); }
 function saveData(data){ localStorage.setItem(KEY, JSON.stringify(data)); }
+
+const CFG_KEY = KEY + "_cfg";
+let jbCfg = Object.assign({ binId:"6a9c56afda38895dfe3d4fa0", key:"$2a$10$iviEDgrD6ZbLLwzqzT9JOeOAehlvBuGWKPq20MAkQb7GXGBW7FYia", keyHeader:"X-Access-Key" }, JSON.parse(localStorage.getItem(CFG_KEY)||"{}"));
+function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(jbCfg)); }
+
+async function jbRead(){
+  const r = await fetch(`https://api.jsonbin.io/v3/b/${jbCfg.binId}/latest`, { headers: { [jbCfg.keyHeader]: jbCfg.key } });
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  const j = await r.json();
+  const list = (j.record && Array.isArray(j.record.data)) ? j.record.data : [];
+  return { list, version: j.metadata && j.metadata.versionId };
+}
+async function jbWrite(list){
+  const r = await fetch(`https://api.jsonbin.io/v3/b/${jbCfg.binId}`, {
+    method:"PUT", headers:{ [jbCfg.keyHeader]: jbCfg.key, "Content-Type":"application/json" }, body: JSON.stringify({ data: list })
+  });
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  const j = await r.json();
+  return j.metadata && j.metadata.versionId;
+}
+let jbSyncing = false;
+async function syncToJB(item){
+  if(jbSyncing) return;
+  jbSyncing = true;
+  const msg = document.getElementById("syncMsg");
+  try {
+    msg.textContent = "Menyimpan ke JSONBin...";
+    const remote = await jbRead();
+    const merged = remote.list.filter(x=>x.id!==item.id);
+    merged.push(item);
+    await jbWrite(merged);
+    msg.textContent = "✓ Tersimpan di JSONBin (cloud).";
+  } catch(err) {
+    msg.textContent = "⚠ Gagal JSONBin ("+err.message+"). Data tetap tersimpan lokal & Sheets.";
+  } finally { jbSyncing = false; }
+}
 
 function updateProgress(){
   let answered=0;
@@ -318,6 +368,7 @@ form.addEventListener("submit", async (e)=>{
     kemampuanBerikutnya:fd.get("q16"), halDiingat:fd.get("q17"), harapan:fd.get("q18")
   };
   const data=getData(); data.push(item); saveData(data);
+  syncToJB(item);
 
   const SHEET_URL = "https://script.google.com/macros/s/AKfycbwjRApvU_TYf0-5IZkFByEI6kco_JM6imU_LAAl-kv85EK_2HssEqlBCAyi_mt45AGO/exec";
   try {
@@ -392,6 +443,32 @@ document.getElementById("clearData").onclick=()=>{
   if(confirm("Yakin ingin menghapus SEMUA data asesmen dari browser ini?")){
     localStorage.removeItem(KEY); refreshTeacher(); alert("Data lokal sudah dihapus.");
   }
+};
+document.getElementById("syncFromJB").onclick=async ()=>{
+  const b=document.getElementById("syncFromJB"); const old=b.textContent;
+  b.disabled=true; b.textContent="Memuat...";
+  try {
+    const remote=await jbRead(); const local=getData();
+    const map=new Map(); local.forEach(x=>map.set(x.id,x)); remote.list.forEach(x=>map.set(x.id,x));
+    const merged=[...map.values()].sort((a,b)=>a.id-b.id);
+    saveData(merged); refreshTeacher();
+    alert("Tersinkron: "+remote.list.length+" data dimuat dari JSONBin.");
+  } catch(err){ alert("Gagal memuat dari JSONBin: "+(err.message||err)); }
+  b.disabled=false; b.textContent=old;
+};
+function fillCfg(){ document.getElementById("cfgBinId").value=jbCfg.binId; document.getElementById("cfgKey").value=jbCfg.key; }
+document.getElementById("configJB").onclick=()=>{ document.getElementById("jbCfgBox").classList.toggle("hidden"); fillCfg(); };
+document.getElementById("saveCfgBtn").onclick=()=>{
+  jbCfg.binId=document.getElementById("cfgBinId").value.trim();
+  jbCfg.key=document.getElementById("cfgKey").value.trim();
+  saveCfg(); fillCfg(); document.getElementById("jbCfgBox").classList.add("hidden");
+  alert("Konfigurasi JSONBin tersimpan.");
+};
+document.getElementById("testJB").onclick=async ()=>{
+  jbCfg.binId=document.getElementById("cfgBinId").value.trim();
+  jbCfg.key=document.getElementById("cfgKey").value.trim(); saveCfg();
+  try { const t=await jbRead(); alert("Koneksi OK. "+t.list.length+" data ditemukan."); }
+  catch(err){ alert("Gagal: "+(err.message||err)+"\nPeriksa Bin ID & Master Key. Pastikan bin milik akun yang sama."); }
 };
 refreshTeacher();
 </script>
