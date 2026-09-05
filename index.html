@@ -227,7 +227,7 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:12px}
       <div class="actions">
         <button type="submit" class="primary">✓ Submit Asesmen</button>
         <button type="button" class="secondary" id="resetBtn">Reset Form</button>
-        <button type="button" class="blue" id="teacherBtn">Mode Rekap Guru</button>
+        <button type="button" class="blue" id="teacherBtn">🔒 Mode Rekap Guru</button>
       </div>
     </section>
   </form>
@@ -425,9 +425,14 @@ function refreshTeacher(){
 function safe(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
 
 document.getElementById("teacherBtn").onclick=()=>{
-  document.getElementById("teacherPanel").classList.toggle("hidden");
-  refreshTeacher();
-  document.getElementById("teacherPanel").scrollIntoView({behavior:"smooth"});
+  const pin=prompt("Masukkan PIN untuk membuka Mode Rekap Guru:");
+  if(pin==="071098"){
+    document.getElementById("teacherPanel").classList.toggle("hidden");
+    refreshTeacher();
+    document.getElementById("teacherPanel").scrollIntoView({behavior:"smooth"});
+  } else if(pin!==null){
+    alert("PIN salah. Akses ditolak.");
+  }
 };
 document.getElementById("downloadJSON").onclick=()=>{
   download("rekap_asesmen_cisco.json",JSON.stringify(getData(),null,2),"application/json");
